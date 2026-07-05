@@ -12,6 +12,9 @@
  */
 function initializeSheets() {
   const spreadsheet = getSpreadsheet_();
+  // シートの表示タイムゾーンはスプレッドシート設定に従う（GASプロジェクトの
+  // timeZone とは別物）。月次KPIの境界がずれないよう明示的に揃える
+  spreadsheet.setSpreadsheetTimeZone('Asia/Tokyo');
   [
     { name: SHEET_MEMBERS, headers: MEMBER_HEADERS },
     { name: SHEET_EVENT_LOG, headers: EVENT_LOG_HEADERS },

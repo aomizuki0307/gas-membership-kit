@@ -78,10 +78,10 @@ clasp deploy -i <デプロイID> -d "update"
 
 ```powershell
 # T1: トークンなし → EventLog に token_ng が1行増えるのが正解
-curl.exe -sL -X POST "https://script.google.com/macros/s/<デプロイID>/exec" -H "Content-Type: application/json" -d '{"id":"evt_fake"}'
+curl.exe -sL "https://script.google.com/macros/s/<デプロイID>/exec" -H "Content-Type: application/json" -d '{"id":"evt_fake"}'
 
 # T2: トークンあり + 偽イベントID → not_found_on_stripe が正解（STRIPE_SECRET_KEY 設定後）
-curl.exe -sL -X POST "https://script.google.com/macros/s/<デプロイID>/exec?token=<WEBHOOK_TOKEN>" -H "Content-Type: application/json" -d '{"id":"evt_fake123","type":"checkout.session.completed","livemode":false}'
+curl.exe -sL "https://script.google.com/macros/s/<デプロイID>/exec?token=<WEBHOOK_TOKEN>" -H "Content-Type: application/json" -d '{"id":"evt_fake123","type":"checkout.session.completed","livemode":false}'
 ```
 
 GAS Web アプリは 302 リダイレクトを挟むので curl には `-L` が必要。どちらも応答は `{"received":true}` になる（HTTPステータスで拒否を表現できないため）。判定は EventLog シートで行う。
