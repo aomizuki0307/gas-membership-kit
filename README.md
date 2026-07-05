@@ -4,7 +4,19 @@
 
 すべて Stripe **テストモード**で動かす前提で、実カード・実課金は一切使わない。
 
-<!-- TODO: デモGIF（Payment Linkでテスト決済 → Membersシートに行が増える様子） -->
+## 動作デモ（実測）
+
+Payment Link をテストカード 4242 で決済すると、Webhook 経由で会員DBに自動起票される。
+
+![入会起票](docs/images/demo-members-joined.png)
+
+ダッシュボードからサブスクリプションをキャンセルすると `customer.subscription.deleted` が飛び、同じ行が `canceled` に更新される（行は消さない）。
+
+![退会起票](docs/images/demo-members-canceled.png)
+
+EventLog には受信の全経路が残る。偽イベントの拒否（`not_found_on_stripe`）、入会・退会の `processed`、そして **Stripe の再送を冪等性ガードが `duplicate` として無害化した記録**まで、1枚で追える。
+
+![EventLog](docs/images/demo-eventlog.png)
 
 ## 構成
 
@@ -99,7 +111,8 @@ doPost
 
 ## 既知の制約
 
-- HTTP ステータスを返せないため、Stripe の自動リトライを自分側の障害時に誘発できない。EventLog を見て手動再送する
+- **Stripe の配信ステータスは常に「失敗」と表示される（実測）**。GAS の Web アプリは POST 応答を 302 リダイレクトで返し、Stripe はリダイレクトを追わないため。処理は実際には成功しており、成否の正は EventLog シート。失敗扱いに伴う Stripe の自動再送は冪等性ガードが `duplicate` として無害化する（実測で再送1件をブロック済み）。ただし失敗が長期間続く扱いになるため、Stripe がエンドポイントを自動無効化する可能性には注意
+- HTTP ステータスを返せないため、Stripe の自動リトライを自分側の障害時に「意図的に」誘発することもできない。EventLog を見て手動再送する
 - 冪等性チェックは EventLog シートの全走査（TextFinder）。個人コミュニティの件数なら十分だが、大量イベントには向かない
 - テストモード専用として設計している。本番転用するなら少なくとも署名検証（プロキシ経由）と livemode チェックの厳格化が必要
 
