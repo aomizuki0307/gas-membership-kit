@@ -23,11 +23,10 @@ function doPost(e) {
   let lock = null;
   const logBase = {};
   try {
-    const config = getConfig_();
-
     // 1. トークン照合（タイミング攻撃対策でダイジェスト比較）
+    const webhookToken = requireConfig_('webhookToken');
     const token = e && e.parameter ? e.parameter.token : '';
-    if (!token || !secureEquals_(token, config.webhookToken)) {
+    if (!token || !secureEquals_(token, webhookToken)) {
       logEvent_({
         verification: VERIFICATION.TOKEN_NG,
         summary: 'token mismatch or missing',

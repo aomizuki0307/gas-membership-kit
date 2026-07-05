@@ -32,6 +32,12 @@ const PROCESSING = {
 const LOCK_TIMEOUT_MS = 10000;
 const SUMMARY_MAX_LENGTH = 500;
 
+const CONFIG_PROPERTY_NAMES = {
+  stripeSecretKey: 'STRIPE_SECRET_KEY',
+  webhookToken: 'WEBHOOK_TOKEN',
+  spreadsheetId: 'SPREADSHEET_ID',
+};
+
 // 1実行内でのキャッシュ（ロック保持中の Properties/openById 再取得を避ける）
 let cachedConfig_ = null;
 let cachedSpreadsheet_ = null;
@@ -41,24 +47,32 @@ function getConfig_() {
     return cachedConfig_;
   }
   const props = PropertiesService.getScriptProperties();
-  const config = {
+  cachedConfig_ = {
     stripeSecretKey: props.getProperty('STRIPE_SECRET_KEY'),
     webhookToken: props.getProperty('WEBHOOK_TOKEN'),
     spreadsheetId: props.getProperty('SPREADSHEET_ID'),
   };
-  const missing = Object.keys(config).filter((key) => !config[key]);
-  if (missing.length > 0) {
+  return cachedConfig_;
+}
+
+/**
+ * 使う場面で必要なプロパティだけを検証して返す。
+ * 全プロパティを一括必須にすると、Stripeキー未設定の段階で
+ * initializeSheets 等のセットアップ関数まで動かなくなるため。
+ */
+function requireConfig_(key) {
+  const value = getConfig_()[key];
+  if (!value) {
     throw new Error(
-      'Script Properties が未設定です: ' + missing.join(', ')
+      'Script Property が未設定です: ' + CONFIG_PROPERTY_NAMES[key]
     );
   }
-  cachedConfig_ = config;
-  return config;
+  return value;
 }
 
 function getSpreadsheet_() {
   if (!cachedSpreadsheet_) {
-    cachedSpreadsheet_ = SpreadsheetApp.openById(getConfig_().spreadsheetId);
+    cachedSpreadsheet_ = SpreadsheetApp.openById(requireConfig_('spreadsheetId'));
   }
   return cachedSpreadsheet_;
 }

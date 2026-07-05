@@ -14,10 +14,9 @@ const STRIPE_API_BASE = 'https://api.stripe.com/v1';
  * Stripe API への GET。{ code, body } を返す（body は生テキスト）。
  */
 function stripeGet_(path) {
-  const config = getConfig_();
   const response = UrlFetchApp.fetch(STRIPE_API_BASE + path, {
     method: 'get',
-    headers: { Authorization: 'Bearer ' + config.stripeSecretKey },
+    headers: { Authorization: 'Bearer ' + requireConfig_('stripeSecretKey') },
     muteHttpExceptions: true,
   });
   return {

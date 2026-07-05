@@ -11,8 +11,7 @@
  * 既存シートがあればヘッダーだけ上書きする（データ行は触らない）。
  */
 function initializeSheets() {
-  const config = getConfig_();
-  const spreadsheet = SpreadsheetApp.openById(config.spreadsheetId);
+  const spreadsheet = getSpreadsheet_();
   [
     { name: SHEET_MEMBERS, headers: MEMBER_HEADERS },
     { name: SHEET_EVENT_LOG, headers: EVENT_LOG_HEADERS },
@@ -32,12 +31,16 @@ function initializeSheets() {
  */
 function checkConfig() {
   const config = getConfig_();
-  console.log('STRIPE_SECRET_KEY: set (length=' + config.stripeSecretKey.length + ')');
-  console.log('WEBHOOK_TOKEN: set (length=' + config.webhookToken.length + ')');
-  console.log('SPREADSHEET_ID: set');
-  console.log(
-    'spreadsheet name: ' + SpreadsheetApp.openById(config.spreadsheetId).getName()
-  );
+  Object.keys(CONFIG_PROPERTY_NAMES).forEach((key) => {
+    const value = config[key];
+    console.log(
+      CONFIG_PROPERTY_NAMES[key] + ': ' +
+      (value ? 'set (length=' + value.length + ')' : 'MISSING')
+    );
+  });
+  if (config.spreadsheetId) {
+    console.log('spreadsheet name: ' + getSpreadsheet_().getName());
+  }
 }
 
 /**
