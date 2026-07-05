@@ -5,10 +5,12 @@
  *   STRIPE_SECRET_KEY : Stripe テストモードのシークレットキー (sk_test_...)
  *   WEBHOOK_TOKEN     : Webhook URL の ?token= に付与する自前のランダム文字列
  *   SPREADSHEET_ID    : 会員DB/イベントログを持つスプレッドシートの ID
+ *   ANTHROPIC_API_KEY : Claude API のキー (sk-ant-...)。機能②の月次レポートで使用
  */
 
 const SHEET_MEMBERS = 'Members';
 const SHEET_EVENT_LOG = 'EventLog';
+const SHEET_REPORTS = 'Reports';
 
 const MEMBER_STATUS = {
   ACTIVE: 'active',
@@ -36,6 +38,7 @@ const CONFIG_PROPERTY_NAMES = {
   stripeSecretKey: 'STRIPE_SECRET_KEY',
   webhookToken: 'WEBHOOK_TOKEN',
   spreadsheetId: 'SPREADSHEET_ID',
+  anthropicApiKey: 'ANTHROPIC_API_KEY',
 };
 
 // 1実行内でのキャッシュ（ロック保持中の Properties/openById 再取得を避ける）
@@ -51,6 +54,7 @@ function getConfig_() {
     stripeSecretKey: props.getProperty('STRIPE_SECRET_KEY'),
     webhookToken: props.getProperty('WEBHOOK_TOKEN'),
     spreadsheetId: props.getProperty('SPREADSHEET_ID'),
+    anthropicApiKey: props.getProperty('ANTHROPIC_API_KEY'),
   };
   return cachedConfig_;
 }

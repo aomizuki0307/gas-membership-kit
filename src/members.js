@@ -53,6 +53,34 @@ function findMemberRow_(sheet, column, value) {
 }
 
 /**
+ * status=active の会員を全件返す（機能②の月次レポート対象抽出）。
+ * 会員0件なら空配列。個人コミュニティ規模なので全行読みで十分。
+ *
+ * @return {Array<{customerId: string, subscriptionId: string, email: string,
+ *                 name: string, plan: string, joinedAt: Date|string}>}
+ */
+function getActiveMembers_() {
+  const sheet = getSheet_(SHEET_MEMBERS);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return [];
+  }
+  const rows = sheet
+    .getRange(2, 1, lastRow - 1, MEMBER_HEADERS.length)
+    .getValues();
+  return rows
+    .filter((row) => row[MEMBER_COL.STATUS - 1] === MEMBER_STATUS.ACTIVE)
+    .map((row) => ({
+      customerId: String(row[MEMBER_COL.CUSTOMER_ID - 1]),
+      subscriptionId: String(row[MEMBER_COL.SUBSCRIPTION_ID - 1]),
+      email: String(row[MEMBER_COL.EMAIL - 1]),
+      name: String(row[MEMBER_COL.NAME - 1]),
+      plan: String(row[MEMBER_COL.PLAN - 1]),
+      joinedAt: row[MEMBER_COL.JOINED_AT - 1],
+    }));
+}
+
+/**
  * 入会起票。既存会員（同じ customer_id）なら再入会として更新、
  * いなければ新規行を追記する。
  *

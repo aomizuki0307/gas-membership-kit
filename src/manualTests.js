@@ -18,6 +18,7 @@ function initializeSheets() {
   [
     { name: SHEET_MEMBERS, headers: MEMBER_HEADERS },
     { name: SHEET_EVENT_LOG, headers: EVENT_LOG_HEADERS },
+    { name: SHEET_REPORTS, headers: REPORT_HEADERS },
   ].forEach((def) => {
     let sheet = spreadsheet.getSheetByName(def.name);
     if (!sheet) {
@@ -54,6 +55,23 @@ function checkStripeConnection() {
   console.log('GET /v1/balance -> HTTP ' + res.code);
   if (res.code !== 200) {
     console.log(res.body);
+  }
+}
+
+/**
+ * Claude API への疎通確認。最小トークンで Messages API を1回叩くだけ。
+ * ANTHROPIC_API_KEY の設定後に実行する（数トークン分だけ課金される）。
+ */
+function checkClaudeConnection() {
+  const result = callClaudeMessages_(
+    'You are a connectivity check. Reply with exactly: ok',
+    'ping'
+  );
+  if (result.status === 'ok') {
+    console.log('POST /v1/messages -> ok (model=' + REPORT_MODEL +
+      ', in=' + result.inputTokens + ', out=' + result.outputTokens + ')');
+  } else {
+    console.log('POST /v1/messages -> HTTP ' + result.code + ': ' + result.message);
   }
 }
 
