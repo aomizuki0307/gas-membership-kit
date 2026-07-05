@@ -1,0 +1,3 @@
+# rootDir=src 配下のみ push 対象。ここでは念のため非コード類を除外する
+**/*.md
+**/node_modules/**

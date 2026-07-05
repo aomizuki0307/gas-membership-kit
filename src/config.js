@@ -1,0 +1,104 @@
+/**
+ * config.js — Script Properties の読み出しとプロジェクト全体の定数。
+ *
+ * 必要な Script Properties（GASエディタ > プロジェクトの設定 > スクリプト プロパティ）:
+ *   STRIPE_SECRET_KEY : Stripe テストモードのシークレットキー (sk_test_...)
+ *   WEBHOOK_TOKEN     : Webhook URL の ?token= に付与する自前のランダム文字列
+ *   SPREADSHEET_ID    : 会員DB/イベントログを持つスプレッドシートの ID
+ */
+
+const SHEET_MEMBERS = 'Members';
+const SHEET_EVENT_LOG = 'EventLog';
+
+const MEMBER_STATUS = {
+  ACTIVE: 'active',
+  CANCELED: 'canceled',
+};
+
+const VERIFICATION = {
+  VERIFIED: 'verified',
+  TOKEN_NG: 'token_ng',
+  NOT_FOUND: 'not_found_on_stripe',
+  PARSE_ERROR: 'parse_error',
+};
+
+const PROCESSING = {
+  PROCESSED: 'processed',
+  DUPLICATE: 'duplicate',
+  TYPE_IGNORED: 'type_ignored',
+  ERROR: 'error',
+};
+
+const LOCK_TIMEOUT_MS = 10000;
+const SUMMARY_MAX_LENGTH = 500;
+
+// 1実行内でのキャッシュ（ロック保持中の Properties/openById 再取得を避ける）
+let cachedConfig_ = null;
+let cachedSpreadsheet_ = null;
+
+function getConfig_() {
+  if (cachedConfig_) {
+    return cachedConfig_;
+  }
+  const props = PropertiesService.getScriptProperties();
+  const config = {
+    stripeSecretKey: props.getProperty('STRIPE_SECRET_KEY'),
+    webhookToken: props.getProperty('WEBHOOK_TOKEN'),
+    spreadsheetId: props.getProperty('SPREADSHEET_ID'),
+  };
+  const missing = Object.keys(config).filter((key) => !config[key]);
+  if (missing.length > 0) {
+    throw new Error(
+      'Script Properties が未設定です: ' + missing.join(', ')
+    );
+  }
+  cachedConfig_ = config;
+  return config;
+}
+
+function getSpreadsheet_() {
+  if (!cachedSpreadsheet_) {
+    cachedSpreadsheet_ = SpreadsheetApp.openById(getConfig_().spreadsheetId);
+  }
+  return cachedSpreadsheet_;
+}
+
+function getSheet_(sheetName) {
+  const sheet = getSpreadsheet_().getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error('シートが見つかりません: ' + sheetName + '（manualTests.js の initializeSheets を実行してください）');
+  }
+  return sheet;
+}
+
+/**
+ * シートへ書く自由文字列の数式インジェクション対策。
+ * setValue/appendRow は先頭が = の文字列を数式として解釈し、+ - @ も
+ * 編集やCSV再取込で数式化しうるため、先頭にアポストロフィを付けて
+ * テキスト扱いを強制する（表示上は見えない）。
+ */
+function sanitizeForSheet_(value) {
+  const text = value === undefined || value === null ? '' : String(value);
+  if (text && '=+-@'.indexOf(text.charAt(0)) !== -1) {
+    return "'" + text;
+  }
+  return text;
+}
+
+/**
+ * タイミング攻撃耐性のある文字列比較。SHA-256ダイジェスト同士を
+ * 早期リターンなしで全バイト比較する。
+ */
+function secureEquals_(a, b) {
+  const digestA = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, String(a), Utilities.Charset.UTF_8
+  );
+  const digestB = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256, String(b), Utilities.Charset.UTF_8
+  );
+  let diff = 0;
+  for (let i = 0; i < digestA.length; i++) {
+    diff |= digestA[i] ^ digestB[i];
+  }
+  return diff === 0;
+}

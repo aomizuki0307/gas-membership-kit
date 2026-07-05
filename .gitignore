@@ -1,0 +1,9 @@
+# clasp（scriptId を含むためコミットしない。雛形は .clasp.json.example）
+.clasp.json
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
