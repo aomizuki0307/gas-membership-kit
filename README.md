@@ -108,9 +108,17 @@ generateMonthlyReports（トリガー起点 兼 手動実行可）
 
 Reports シートの report_text を、会員の Slack DM（`Members.slack_user_id`、当面手入力）へ配信し、実行結果の集計を運営チャンネルへ投稿する。起点は `sendMonthlyReportsToSlack` の**手動実行**。LLM 生成文を会員へ送る前に運営が Reports を目視するゲートを挟む運用で、トリガーは意図的に設置していない（無人化する場合は `setupMonthlySlackTrigger` で毎月1日10時台に設定できる）。
 
-![SlackLog起票](docs/images/demo-slacklog-sheet.png)
+会員DMの実受信（Bot が生成済みの report_text をそのまま届ける）:
 
-![冪等性の実測](docs/images/demo-slack-batch-idempotency.png)
+![DM受信](docs/images/demo-slack-dm-received.png)
+
+運営チャンネルのサマリー。1回目「送信: 1」の直後に再実行した2回目が「送信: 0 / 済みスキップ: 1」になっており、冪等性が実測で効いている:
+
+![運営サマリー受信](docs/images/demo-slack-summary-received.png)
+
+SlackLog には DM 送信・サマリー投稿・宛先なしスキップの全経路が slack_ts 付きで残る:
+
+![SlackLog起票](docs/images/demo-slacklog-sheet.png)
 
 ```
 sendMonthlyReportsToSlack（手動実行。4.5分で打ち切り→再実行で残りを処理）
