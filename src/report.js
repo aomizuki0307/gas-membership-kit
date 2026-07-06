@@ -237,6 +237,19 @@ function monthsSinceJoined_(joinedAt, now) {
 }
 
 /**
+ * report_month セルの値を 'yyyy-MM' 文字列に正規化する。
+ * シートは '2026-07' のような文字列を日付として自動解釈することがあり
+ * （実測: 冪等性チェックが Date と文字列の不一致で素通りした）、
+ * getValue() が Date を返しても文字列を返しても比較できるようにする。
+ */
+function normalizeReportMonth_(value) {
+  if (value instanceof Date) {
+    return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy-MM');
+  }
+  return String(value);
+}
+
+/**
  * この (report_month, customer_id) が既に generated 済みかを返す。
  * eventLog.js の isProcessedEvent_ と同じ TextFinder 方式。
  * error 行は「済み」に含めない（再実行での再生成を許す）。
@@ -259,7 +272,10 @@ function isReportGenerated_(reportMonth, customerId) {
     const row = cell.getRow();
     const month = sheet.getRange(row, REPORT_COL.REPORT_MONTH).getValue();
     const status = sheet.getRange(row, REPORT_COL.STATUS).getValue();
-    return String(month) === reportMonth && status === REPORT_STATUS.GENERATED;
+    return (
+      normalizeReportMonth_(month) === reportMonth &&
+      status === REPORT_STATUS.GENERATED
+    );
   });
 }
 
@@ -269,7 +285,9 @@ function isReportGenerated_(reportMonth, customerId) {
 function appendReportRow_(entry) {
   const sheet = getSheet_(SHEET_REPORTS);
   sheet.appendRow([
-    sanitizeForSheet_(entry.reportMonth),
+    // '2026-07' はシートに日付として自動解釈されるため、アポストロフィで
+    // テキスト扱いを強制する（冪等性キーの比較を文字列で安定させる）
+    entry.reportMonth ? "'" + entry.reportMonth : '',
     sanitizeForSheet_(entry.customerId),
     sanitizeForSheet_(entry.name),
     sanitizeForSheet_(entry.plan),
