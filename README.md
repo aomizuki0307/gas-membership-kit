@@ -24,14 +24,13 @@ EventLog には受信の全経路が残る。偽イベントの拒否（`not_fou
 graph LR
     Stripe[Stripe テストモード] -- "Webhook POST (checkout / cancel)" --> GAS[GAS Webアプリ doPost]
     GAS -- "GET /v1/events/id で再照会" --> Stripe
-    GAS -- 起票 --> Sheet[(スプレッドシート<br>Members / EventLog)]
-    Trigger[時刻トリガー 月次] -.-> Report[月次レポート生成<br>Claude API]
+    GAS -- 起票 --> Sheet[(スプレッドシート<br>Members / EventLog / Reports)]
+    Trigger[時刻トリガー 月次] --> Report[月次レポート生成<br>Claude API]
+    Report -- 起票 --> Sheet
     Report -.-> Slack[Slack Bot 通知]
     Sheet -.-> KPI[KPIダッシュボード]
-    style Report stroke-dasharray: 5 5
     style Slack stroke-dasharray: 5 5
     style KPI stroke-dasharray: 5 5
-    style Trigger stroke-dasharray: 5 5
 ```
 
 点線は未実装（ロードマップ参照）。シーケンスの詳細は [docs/architecture.md](docs/architecture.md)。
@@ -56,7 +55,7 @@ Stripe Webhook の標準的な受け方は `Stripe-Signature` ヘッダーの HM
 | # | 機能 | 状態 |
 |---|------|------|
 | 1 | Stripe Webhook → 会員DB起票（入会/退会） | 実装済み |
-| 2 | 月次バッチ → Claude API で会員ごとのレポート文生成 | 予定（report.js） |
+| 2 | 月次バッチ → Claude API で会員ごとのレポート文生成 | 実装済み（report.js） |
 | 3 | Slack Bot 通知（チャンネル投稿 + DM） | 予定（slack.js） |
 | 4 | KPIダッシュボード（会員数・継続率の自動集計） | 予定（kpi.js） |
 
@@ -77,6 +76,34 @@ doPost
 ```
 
 購読イベントはこの2つだけに絞った。`customer.created` は入会確定前にも飛び、`invoice.paid` は毎月飛んでログのノイズになる。`customer.subscription.updated` を足すと到着順序（Stripe は順序を保証しない）の考慮が要るので、状態遷移を単純に保つためにあえて入れていない。
+
+## 月次レポート生成（機能2）
+
+毎月1日 9時台 JST の時刻トリガーが `generateMonthlyReports` を起動し、`status=active` の会員ごとに Claude API（`claude-haiku-4-5`）で**会員本人向けの月次メッセージ**を生成して Reports シートに起票する。生成物は機能3で Slack DM 送信する素材になる。
+
+![Reports起票](docs/images/demo-reports-sheet.png)
+
+![月次トリガー](docs/images/demo-report-trigger.png)
+
+```
+generateMonthlyReports（トリガー起点 兼 手動実行可）
+ ├─ active会員の抽出（0件なら no_members を1行記録して終了）
+ └─ 会員ごとに（1会員分だけスクリプトロックを保持）
+      ├─ 冪等性チェック ── (report_month, customer_id) が generated 済み: スキップ
+      ├─ Claude API 呼び出し ── 失敗: error 行を残して次の会員へ
+      └─ Reports に起票
+```
+
+設計判断:
+
+- **モデルはコスト最優先で Haiku 4.5 固定**。1レポート ≈ 入力800+出力400トークン ≈ $0.003。会員100人でも月 ≈ $0.3
+- **冪等性キーは (report_month, stripe_customer_id)**。トリガーの重複発火や手動再実行が二重生成・二重課金にならない。実測の落とし穴: シートは `2026-07` を日付として自動解釈して比較が素通りするため、書き込みはテキスト強制＋読み出しは正規化の両対応にした
+- **ロックは1会員分だけ保持**。webhook の doPost と同じスクリプト共有ロックなので、バッチ全体で握るとレポート生成中に届いた Stripe イベントがロック待ちで死ぬ（GAS は常に200を返すため Stripe は再送しない＝イベント喪失）
+- **GAS の6分強制終了対策**として4.5分で打ち切り、残りは手動再実行で処理する（生成済みはスキップされる）
+- **プロンプトインジェクション緩和**: 会員名は Checkout の自由入力なので `<member_data>` タグで構造的に区切り、データとしてのみ扱うよう system プロンプトで指示。機能3で自動送信を作る際に送信前ゲートを再検討する
+- LLM 出力もシートへは全フィールド `sanitizeForSheet_` 経由（機能1と同じ CWE-1236 対策）
+
+テスト用の関数（GASエディタから実行）: `checkClaudeConnection`（疎通）/ `testGenerateSingleReport`（1件だけ全経路）/ `setupMonthlyReportTrigger`・`deleteMonthlyReportTrigger`（トリガー管理）。
 
 ## シートスキーマ
 
@@ -101,6 +128,18 @@ doPost
 | verification | verified / token_ng / not_found_on_stripe / parse_error |
 | processing | processed / duplicate / type_ignored / error |
 | customer_id / summary / error_message | 調査用 |
+
+**Reports**（追記オンリー。冪等性キー = report_month + stripe_customer_id）
+
+| カラム | 用途 |
+|---|---|
+| report_month | 'yyyy-MM'。冪等性キーの片割れ |
+| stripe_customer_id / name / plan | 対象会員の同定 |
+| months_since_joined | 在籍月数（プロンプトの素材） |
+| report_text | 生成されたメッセージ本文（機能3の送信素材） |
+| model / input_tokens / output_tokens | コスト追跡 |
+| status | generated / error / no_members |
+| error_message / generated_at | 調査用 |
 
 ## セットアップ
 
