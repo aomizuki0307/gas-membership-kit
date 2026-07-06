@@ -16,6 +16,7 @@ const SHEET_MEMBERS = 'Members';
 const SHEET_EVENT_LOG = 'EventLog';
 const SHEET_REPORTS = 'Reports';
 const SHEET_SLACK_LOG = 'SlackLog';
+const SHEET_KPI = 'KPI';
 
 const MEMBER_STATUS = {
   ACTIVE: 'active',

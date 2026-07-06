@@ -20,6 +20,7 @@ function initializeSheets() {
     { name: SHEET_EVENT_LOG, headers: EVENT_LOG_HEADERS },
     { name: SHEET_REPORTS, headers: REPORT_HEADERS },
     { name: SHEET_SLACK_LOG, headers: SLACK_LOG_HEADERS },
+    { name: SHEET_KPI, headers: KPI_HEADERS },
   ].forEach((def) => {
     let sheet = spreadsheet.getSheetByName(def.name);
     if (!sheet) {
