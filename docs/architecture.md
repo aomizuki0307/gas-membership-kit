@@ -14,7 +14,8 @@ graph LR
         SS[(スプレッドシート)]
         M[Members シート]
         E[EventLog シート]
-        T[時刻トリガー 月次]
+        KP[KPI シート]
+        T[時刻トリガー 月次<br>9時 report / 11時 kpi]
     end
     PL --> WH
     WH -- "POST /exec?token=..." --> GAS
@@ -23,12 +24,14 @@ graph LR
     GAS --> E
     SS --- M
     SS --- E
-    T -.-> R[report.js 予定<br>Claude API]
-    R -.-> SL[slack.js 予定]
-    M -.-> K[kpi.js 予定]
+    SS --- KP
+    T --> R[report.js<br>Claude API]
+    R --> SL[slack.js<br>会員DM + 運営サマリー<br>手動実行]
+    T --> K[kpi.js<br>EventLogリプレイ]
+    E -- リプレイ --> K
+    M -- 整合性チェック --> K
+    K -- 集計表 + チャート --> KP
 ```
-
-点線は未実装（機能2〜4）。
 
 ## 機能1: Webhook受信のシーケンス
 
@@ -67,4 +70,5 @@ sequenceDiagram
 
 - **GASはHTTPステータスを制御できない** ため、どの結果でも 200 相当を返す。障害検知とリカバリは EventLog シート + Stripe ダッシュボードの再送機能に寄せる
 - **ロック → 冪等性チェック → 再照会 → 起票** の順序は固定。ロックより先に冪等性を見ると同時リトライで二重起票する
-- 会員行は物理削除しない。`status` の更新のみ。継続率KPI（機能4）が joined_at / canceled_at の履歴に依存するため
+- 会員行は物理削除しない。`status` の更新のみ。行を消すと EventLog との突合（機能4の整合性チェック）が崩れる
+- **機能4のKPIは Members でなく EventLog のリプレイで集計する**。再入会時に Members の joined_at は上書きされるため、月次履歴の単一情報源は追記オンリーの EventLog。KPI シートは毎回全再構築（冪等）で、集計中はロックを握らない（読むだけ＋専用シート書き込みのため。詳細は kpi.js の設計メモ）
