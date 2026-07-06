@@ -27,9 +27,8 @@ graph LR
     GAS -- 起票 --> Sheet[(スプレッドシート<br>Members / EventLog / Reports)]
     Trigger[時刻トリガー 月次] --> Report[月次レポート生成<br>Claude API]
     Report -- 起票 --> Sheet
-    Report -.-> Slack[Slack Bot 通知]
+    Sheet -- report_text --> Slack[Slack 配信<br>会員DM + 運営サマリー]
     Sheet -.-> KPI[KPIダッシュボード]
-    style Slack stroke-dasharray: 5 5
     style KPI stroke-dasharray: 5 5
 ```
 
@@ -56,7 +55,7 @@ Stripe Webhook の標準的な受け方は `Stripe-Signature` ヘッダーの HM
 |---|------|------|
 | 1 | Stripe Webhook → 会員DB起票（入会/退会） | 実装済み |
 | 2 | 月次バッチ → Claude API で会員ごとのレポート文生成 | 実装済み（report.js） |
-| 3 | Slack Bot 通知（チャンネル投稿 + DM） | 予定（slack.js） |
+| 3 | Slack Bot 通知（会員DM + 運営サマリー投稿） | 実装済み（slack.js + slackApi.js） |
 | 4 | KPIダッシュボード（会員数・継続率の自動集計） | 予定（kpi.js） |
 
 この4つで完成。機能追加はしない。
@@ -105,6 +104,47 @@ generateMonthlyReports（トリガー起点 兼 手動実行可）
 
 テスト用の関数（GASエディタから実行）: `checkClaudeConnection`（疎通）/ `testGenerateSingleReport`（1件だけ全経路）/ `setupMonthlyReportTrigger`・`deleteMonthlyReportTrigger`（トリガー管理）。
 
+## Slack 配信（機能3）
+
+Reports シートの report_text を、会員の Slack DM（`Members.slack_user_id`、当面手入力）へ配信し、実行結果の集計を運営チャンネルへ投稿する。起点は `sendMonthlyReportsToSlack` の**手動実行**。LLM 生成文を会員へ送る前に運営が Reports を目視するゲートを挟む運用で、トリガーは意図的に設置していない（無人化する場合は `setupMonthlySlackTrigger` で毎月1日10時台に設定できる）。
+
+![SlackLog起票](docs/images/demo-slacklog-sheet.png)
+
+![冪等性の実測](docs/images/demo-slack-batch-idempotency.png)
+
+```
+sendMonthlyReportsToSlack（手動実行。4.5分で打ち切り→再実行で残りを処理）
+ ├─ 当月の Reports(status=generated) を抽出（同一会員は先勝ちで1件）
+ ├─ 会員ごとに（1会員分だけスクリプトロックを保持）
+ │    ├─ 冪等性チェック ──── (report_month, customer_id, dm) が sent/blocked 済み: スキップ
+ │    ├─ 宛先の解決 ──────── active でない / slack_user_id 未設定・形式不正: skipped_no_slack_id
+ │    ├─ 検証ゲート ──────── NG: blocked（送信しない）
+ │    └─ conversations.open → chat.postMessage → SlackLog に起票
+ └─ 運営チャンネルへ実行サマリー投稿（件数のみの固定フォーマット）
+```
+
+設計判断:
+
+- **送信前の検証ゲート**。report_text は LLM 出力＝信頼できない文字列で、会員名（Stripe Checkout の自由入力）経由のプロンプトインジェクションがありうる。長さ 20〜500 字・URL/スキーム省略ドメイン/IP アドレス・制御文字/bidi 制御/ゼロ幅文字をすべて拒否し、NG は blocked として SlackLog に残して送信しない。想定文面（日本語のお礼 150〜250 字）にドメイン様の文字列が出ること自体が異常なので、誤検知は許容する設計
+- **エスケープは送信の最終関門で強制**。`postSlackMessage_` 内部で & < > を無条件に実体参照化するため、`<!channel>` や `<@U...>` などのメンション・リンク構文は経路を問わず構造的に成立しない（ゲートとの二重防御）
+- **冪等性キーは (report_month, stripe_customer_id, channel_type=dm)**。「済み」は sent と blocked のみ。blocked を済みに含めないと再実行のたびに blocked 行が増殖する。error と skipped_no_slack_id は済みに含めず、**slack_user_id を後から手入力して再実行すれば送られる**（これが正規の運用導線）
+- **at-least-once に倒す**。送信成功→ログ書き込み前のクラッシュは「重複DM」として現れる。逆順（先にログ）だと「送っていないのに sent」という検知不能な不整合になるため採らない
+- **運営サマリーは件数のみの固定フォーマット**（LLM テキスト・会員名を含めない＝この経路にインジェクション面はない）。冪等ブロックもしない。再実行の回復結果こそ運営が見たい情報で、全スキップの「0 sent / N skipped」もハートビートとして機能する
+- **Slack API はエラーを HTTP 200 + `{ok:false}` で返す**ため、ラッパは HTTP コードと `body.ok` の両方を検査する（`channel_not_found`=bot の /invite 漏れ、`invalid_auth`=トークン不備が全部 200 で来る）
+- DM は `chat.postMessage` への U-ID 直渡しではなく `conversations.open`（冪等）→ D-ID 宛て投稿。公式ドキュメント内で直渡しの挙動記述が矛盾しているため、一意に文書化されている経路に統一した
+
+実測済み: 宛先なしフォールバック（運営チャンネルへ `[DMテスト代替]`）→ DM 実送信 → 同月再実行で「送信=0 / 済みスキップ=1」の冪等性まで全経路を確認。
+
+テスト用の関数（GASエディタから実行）: `checkSlackConnection`（auth.test 疎通）/ `testValidateReportText`（ゲート単体・ネットワーク不要）/ `testSendSingleReportToSlack`（1件だけ全経路。会員0件・slack_user_id 未設定でも運営チャンネル代替で動く）。
+
+### Slack アプリのセットアップ
+
+1. [api.slack.com/apps](https://api.slack.com/apps) → Create New App（From scratch）
+2. OAuth & Permissions → Bot Token Scopes に **`chat:write`** と **`im:write`** を追加
+3. Install to Workspace → `xoxb-` トークンを Script Properties の **`SLACK_BOT_TOKEN`** へ
+4. 運営チャンネルで `/invite @ボット名` → チャンネルID (C...) を **`SLACK_SUMMARY_CHANNEL`** へ
+5. 会員のDM宛先: Slack プロフィール → 「メンバーIDをコピー」(U...) を Members シートの `slack_user_id` に手入力
+
 ## シートスキーマ
 
 **Members**（主キー = stripe_customer_id。物理削除はしない。履歴が消えると継続率が計算できなくなる）
@@ -140,6 +180,19 @@ generateMonthlyReports（トリガー起点 兼 手動実行可）
 | model / input_tokens / output_tokens | コスト追跡 |
 | status | generated / error / no_members |
 | error_message / generated_at | 調査用 |
+
+**SlackLog**（追記オンリー。DM の冪等性キー = report_month + stripe_customer_id + channel_type）
+
+| カラム | 用途 |
+|---|---|
+| sent_at | 記録日時 |
+| report_month | 'yyyy-MM'。冪等性キーの一部 |
+| stripe_customer_id | 対象会員（サマリー行は空） |
+| channel_type | dm / summary |
+| target | 実際の送信先（D... / C...） |
+| status | sent / blocked / error / skipped_no_slack_id |
+| slack_ts | chat.postMessage 応答の ts。送信の一次証跡 |
+| error_message | blocked/skipped/error の理由 |
 
 ## セットアップ
 
