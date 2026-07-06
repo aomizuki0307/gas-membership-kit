@@ -6,11 +6,16 @@
  *   WEBHOOK_TOKEN     : Webhook URL の ?token= に付与する自前のランダム文字列
  *   SPREADSHEET_ID    : 会員DB/イベントログを持つスプレッドシートの ID
  *   ANTHROPIC_API_KEY : Claude API のキー (sk-ant-...)。機能②の月次レポートで使用
+ *   SLACK_BOT_TOKEN   : Slack Bot の OAuth トークン (xoxb-...)。機能③の通知で使用。
+ *                       必要な Bot Token Scopes は chat:write + im:write
+ *   SLACK_SUMMARY_CHANNEL : 運営サマリーの投稿先チャンネル ID (C...)。
+ *                           Bot をそのチャンネルに /invite しておくこと
  */
 
 const SHEET_MEMBERS = 'Members';
 const SHEET_EVENT_LOG = 'EventLog';
 const SHEET_REPORTS = 'Reports';
+const SHEET_SLACK_LOG = 'SlackLog';
 
 const MEMBER_STATUS = {
   ACTIVE: 'active',
@@ -39,6 +44,8 @@ const CONFIG_PROPERTY_NAMES = {
   webhookToken: 'WEBHOOK_TOKEN',
   spreadsheetId: 'SPREADSHEET_ID',
   anthropicApiKey: 'ANTHROPIC_API_KEY',
+  slackBotToken: 'SLACK_BOT_TOKEN',
+  slackSummaryChannel: 'SLACK_SUMMARY_CHANNEL',
 };
 
 // 1実行内でのキャッシュ（ロック保持中の Properties/openById 再取得を避ける）
@@ -55,6 +62,8 @@ function getConfig_() {
     webhookToken: props.getProperty('WEBHOOK_TOKEN'),
     spreadsheetId: props.getProperty('SPREADSHEET_ID'),
     anthropicApiKey: props.getProperty('ANTHROPIC_API_KEY'),
+    slackBotToken: props.getProperty('SLACK_BOT_TOKEN'),
+    slackSummaryChannel: props.getProperty('SLACK_SUMMARY_CHANNEL'),
   };
   return cachedConfig_;
 }

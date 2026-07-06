@@ -19,6 +19,7 @@ function initializeSheets() {
     { name: SHEET_MEMBERS, headers: MEMBER_HEADERS },
     { name: SHEET_EVENT_LOG, headers: EVENT_LOG_HEADERS },
     { name: SHEET_REPORTS, headers: REPORT_HEADERS },
+    { name: SHEET_SLACK_LOG, headers: SLACK_LOG_HEADERS },
   ].forEach((def) => {
     let sheet = spreadsheet.getSheetByName(def.name);
     if (!sheet) {
@@ -72,6 +73,21 @@ function checkClaudeConnection() {
       ', in=' + result.inputTokens + ', out=' + result.outputTokens + ')');
   } else {
     console.log('POST /v1/messages -> HTTP ' + result.code + ': ' + result.message);
+  }
+}
+
+/**
+ * Slack API への疎通確認。auth.test を1回叩くだけ（スコープ不要）。
+ * SLACK_BOT_TOKEN の設定後に実行する。
+ */
+function checkSlackConnection() {
+  const result = slackAuthTest_();
+  if (result.status === 'ok') {
+    console.log('POST /auth.test -> ok (team=' + result.team +
+      ', bot_user_id=' + result.botUserId + ')');
+  } else {
+    console.log('POST /auth.test -> HTTP ' + result.code + ': ' + result.message +
+      '（invalid_auth ならトークンを確認してください）');
   }
 }
 

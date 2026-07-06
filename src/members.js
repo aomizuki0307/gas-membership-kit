@@ -57,7 +57,8 @@ function findMemberRow_(sheet, column, value) {
  * 会員0件なら空配列。個人コミュニティ規模なので全行読みで十分。
  *
  * @return {Array<{customerId: string, subscriptionId: string, email: string,
- *                 name: string, plan: string, joinedAt: Date|string}>}
+ *                 name: string, plan: string, joinedAt: Date|string,
+ *                 slackUserId: string}>}
  */
 function getActiveMembers_() {
   const sheet = getSheet_(SHEET_MEMBERS);
@@ -77,6 +78,7 @@ function getActiveMembers_() {
       name: String(row[MEMBER_COL.NAME - 1]),
       plan: String(row[MEMBER_COL.PLAN - 1]),
       joinedAt: row[MEMBER_COL.JOINED_AT - 1],
+      slackUserId: String(row[MEMBER_COL.SLACK_USER_ID - 1] || '').trim(),
     }));
 }
 
