@@ -14,10 +14,14 @@
  * - 冪等性は「毎回全再構築」で担保する（追記オンリーではない）。
  *   既存チャート削除→clearContents→一括書き込み→チャート再挿入なので、
  *   何度実行しても行もチャートも増えない。
- * - スクリプトロックは握らない。読むだけ＋書き込みは専用の KPI シートのみで、
- *   webhook.doPost と共有のロックをバッチで握ると Stripe イベント喪失リスク
- *   （report.js の設計メモ参照）を作る。並走する doPost との競合は最悪
- *   「最新1イベントが今回の集計に入らない」だけで、次回実行で自己修復する。
+ * - ロックは KPI シートへの書き込み区間（チャート削除→再挿入）だけ短く握る。
+ *   トリガーと手動実行が並走すると、片方の removeChart ともう片方の
+ *   insertChart が交錯してチャート重複や表との不整合を作るため。
+ *   集計（読み取り）ではロックを握らない: webhook.doPost と共有のロックを
+ *   バッチで握ると Stripe イベント喪失リスク（report.js の設計メモ参照）を
+ *   作る。書き込み区間は数秒で、report.js の1会員分保持と同等以下。
+ *   並走する doPost との読み取り競合は最悪「最新1イベントが今回の集計に
+ *   入らない」だけで、次回実行で自己修復する。
  * - クロスチェック: リプレイ最終状態のアクティブ数と Members の実アクティブ数を
  *   突き合わせて固定セルに表示する。退会イベントが error（行未発見）で終わった
  *   場合は Members 側も active のままなので両者は一致する。つまり差分が出るのは
@@ -30,6 +34,11 @@
  *   表が自己検証可能になる。遷移しないイベント（active中の入会・inactiveへの
  *   退会）は冪等性ガードが正常なら発生しないはずのもので、warning として
  *   ログに出す。
+ * - チャーン率はコホート定義: 分子は「月初に在籍していた会員のうち当月退会
+ *   した数」に限定する。分子を cancels 列（全退会）にすると、同月入会即退会が
+ *   月初在籍数を超えて churn > 100% / 継続率マイナスという意味不明な表示に
+ *   なりうる（レビューで検出）。コホート定義なら構造的に 0〜100% に収まる。
+ *   同月入会即退会の事実は new_joins / cancels 列とチャートで見える。
  */
 
 const KPI_HEADERS = [
@@ -61,11 +70,18 @@ const KPI_CHART_HEIGHT = 300;
 // 月数が増えても位置が変わらない
 const KPI_CHECK_ANCHOR = { ROW: 1, COLUMN: 9 };
 
+// GAS のトリガー実行は約6分で強制終了されるため、集計が終わった時点で
+// 予算超過なら書き込みへ進まず明確なログで失敗させる（report.js と同じ値）。
+// ここに達するのは EventLog が異常肥大したときだけで、旧い KPI シートは
+// 無傷のまま残る（全再構築方式なので中途半端な状態にならない）
+const KPI_TIME_BUDGET_MS = 4.5 * 60 * 1000;
+
 /**
  * KPIダッシュボード再構築の本体。時刻トリガーの起点であり、GASエディタから
  * そのまま手動実行してもよい（読み取り専用＋全再構築なので何度でも安全）。
  */
 function rebuildKpiDashboard() {
+  const startedAtMs = Date.now();
   try {
     const now = new Date();
     const currentMonthKey = Utilities.formatDate(now, 'Asia/Tokyo', 'yyyy-MM');
@@ -76,13 +92,37 @@ function rebuildKpiDashboard() {
     });
 
     const membersActive = getActiveMembers_().length;
-    const sheet = getSheet_(SHEET_KPI);
-    writeKpiSheet_(sheet, result.rows, {
-      replayActive: result.replayActive,
-      membersActive: membersActive,
-      checkedAt: now,
-    });
-    rebuildKpiCharts_(sheet, result.rows.length);
+    if (Date.now() - startedAtMs > KPI_TIME_BUDGET_MS) {
+      console.error(
+        'rebuildKpiDashboard: 集計だけで実行時間の予算を超えました' +
+        '（EventLog ' + events.length + '件対象）。KPI シートは前回のまま残しています。' +
+        'EventLog の異常肥大（token_ng の大量記録等）を確認し、アーカイブを検討してください'
+      );
+      return;
+    }
+
+    // 書き込み区間のみロック。rebuild 同士の並走（トリガー×手動）で
+    // チャート削除と再挿入が交錯するのを防ぐ。取れなければ書かずに終了
+    //（もう片方が同じ結果を書くので損失はない）
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(LOCK_TIMEOUT_MS)) {
+      console.error(
+        'rebuildKpiDashboard: script lock timeout (' + LOCK_TIMEOUT_MS + 'ms)。' +
+        '別の実行が進行中の可能性が高いため、書き込みせず終了します'
+      );
+      return;
+    }
+    try {
+      const sheet = getSheet_(SHEET_KPI);
+      writeKpiSheet_(sheet, result.rows, {
+        replayActive: result.replayActive,
+        membersActive: membersActive,
+        checkedAt: now,
+      });
+      rebuildKpiCharts_(sheet, result.rows.length);
+    } finally {
+      lock.releaseLock();
+    }
 
     if (result.replayActive !== membersActive) {
       console.warn(
@@ -180,7 +220,10 @@ function computeMonthlyKpis_(events, currentMonthKey) {
   if (events.length === 0) {
     return { rows: [], replayActive: 0, warnings: [] };
   }
-  const active = {};
+  // Object.create(null) でプロトタイプなしの辞書にする。customerId は
+  // Stripe 再照会を通った値だが、'__proto__' 等の継承キーと衝突しない
+  // 構造にしておく（外部由来文字列をキーに使う際の多層防御）
+  const active = Object.create(null);
   const warnings = [];
   const rows = [];
   let monthKey = events[0].monthKey;
@@ -190,8 +233,15 @@ function computeMonthlyKpis_(events, currentMonthKey) {
   let guard = 1200;
   while (guard-- > 0) {
     const activeStart = Object.keys(active).length;
+    // チャーン率の分子は「月初に在籍していた会員の退会」に限定する
+    // （コホート定義。ファイル冒頭の設計メモ参照）
+    const startCohort = Object.create(null);
+    Object.keys(active).forEach((customerId) => {
+      startCohort[customerId] = true;
+    });
     let joins = 0;
     let cancels = 0;
+    let cohortCancels = 0;
     while (i < events.length && events[i].monthKey === monthKey) {
       const event = events[i++];
       if (event.type === 'join') {
@@ -205,6 +255,11 @@ function computeMonthlyKpis_(events, currentMonthKey) {
         if (active[event.customerId]) {
           delete active[event.customerId];
           cancels++;
+          if (startCohort[event.customerId]) {
+            cohortCancels++;
+            // 同月内の退会→再入会→再退会で二重カウントしない
+            delete startCohort[event.customerId];
+          }
         } else {
           warnings.push('inactive への退会イベントを無視: ' + event.customerId + ' (' + monthKey + ')');
         }
@@ -212,7 +267,7 @@ function computeMonthlyKpis_(events, currentMonthKey) {
     }
     // 月初0会員の churn は 0/0 で未定義なので空欄にする（0 と書くと
     // 「解約ゼロの好調月」と区別できなくなる）
-    const churn = activeStart > 0 ? cancels / activeStart : '';
+    const churn = activeStart > 0 ? cohortCancels / activeStart : '';
     rows.push({
       month: monthKey,
       activeStart: activeStart,
@@ -380,14 +435,19 @@ function testKpiReplay() {
     // 6月: イベントなし（ギャップ月が0行で埋まること）
     mk('2026-07-01T10:00:00+09:00', 'join', 'cus_A'),    // 7月: 再入会
     mk('2026-07-02T10:00:00+09:00', 'join', 'cus_A'),    // 7月: active中の入会 → warning
+    // 8月: 月初在籍者(A)がいる月の同月入会即退会。コホート定義なら
+    // churn=0%（Aは退会していない）。全退会を分子にすると 1/1=100% に化ける
+    mk('2026-08-10T10:00:00+09:00', 'join', 'cus_D'),
+    mk('2026-08-20T10:00:00+09:00', 'cancel', 'cus_D'),
   ];
-  const result = computeMonthlyKpis_(events, '2026-07');
+  const result = computeMonthlyKpis_(events, '2026-08');
   const expected = [
     // [month, active_start, joins, cancels, active_end, churn, retention]
     ['2026-04', 0, 2, 1, 1, '', ''],
     ['2026-05', 1, 0, 1, 0, 1, 0],
     ['2026-06', 0, 0, 0, 0, '', ''],
     ['2026-07', 0, 1, 0, 1, '', ''],
+    ['2026-08', 1, 1, 1, 1, 0, 1],
   ];
   let pass = result.rows.length === expected.length && result.replayActive === 1;
   result.rows.forEach((row, i) => {
