@@ -4,6 +4,12 @@
 
 すべて Stripe **テストモード**で動かす前提で、実カード・実課金は一切使わない。
 
+> **EN**: Membership-community automation built entirely on Google Apps Script — no server. Stripe join/cancel webhooks write to a spreadsheet member DB, with monthly reports (Claude API), Slack delivery, and KPI tracking. Test-mode only by design; the docs below are Japanese, but the setup guides in `docs/` show every step with screenshots.
+
+## このリポジトリと有償サービスの関係
+
+コードは MIT ライセンスでここに全部ある。自分でセットアップできる人はそのまま使ってほしい。[ココナラで出品している](https://coconala.com)のはコードではなく、あなたの環境（Stripe アカウント・Slack ワークスペース・スプレッドシート）に合わせた構築・設定作業と、動くところまでの動作確認・引き渡しの部分。「READMEを読んで自分でやるのは大変そうだ」という人向け。
+
 ## 動作デモ（実測）
 
 入会から退会までの全経路を1本の画面収録で。Payment Link のテスト決済 → Webhook が Members シートへ自動起票（active）→ 退会イベントで同じ行が canceled に更新されるまで、編集なしの実挙動:
